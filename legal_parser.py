@@ -32,6 +32,7 @@ JUZGADO_PATTERNS = [
 ]
 
 def extract_juzgado(text):
+    text = _flat(text)
     for pat in JUZGADO_PATTERNS:
         m = re.search(pat, text, re.IGNORECASE)
         if m:
@@ -373,7 +374,7 @@ MATERIA_KEYWORDS = [
 def extract_materia_multi(doc_texts):
     scores = Counter()
     for text in doc_texts:
-        low = text.lower()
+        low = _flat(text).lower()
         for materia, keywords in MATERIA_KEYWORDS:
             for kw in keywords:
                 if kw in low:
@@ -386,6 +387,37 @@ def extract_materia_multi(doc_texts):
 # ---------------------------------------------------------------------------
 # OBJETO / CAUSA JUZGADA
 # ---------------------------------------------------------------------------
+# Encabezados de seccion que NO deben colarse dentro del contenido de OTRO
+# campo (Objeto, Fundamentos...): si aparecen dentro de la ventana de texto
+# que estamos leyendo, es que ya cruzamos a la siguiente seccion.
+SECTION_BOUNDARY_HEADERS = [
+    r"\bHECHOS\b", r"\bFUNDAMENTOS\s+DE\s+DERECHO\b", r"\bFUNDAMENTOS?\s+JUR[IÍ]DICOS\b",
+    r"\bSUPLICO\b", r"\bOTROS[IÍ]\s+DIGO\b", r"\bFALLO\b", r"\bANTECEDENTES\s+DE\s+HECHO\b",
+    r"\bPETICIONES?\b",
+]
+
+
+def _cut_before_next_header(snippet):
+    """Si dentro del fragmento aparece el inicio de otra seccion (buscando a
+    partir del caracter 5, para no confundir con el propio encabezado que ya
+    usamos para localizar esta seccion), recorta ahi: ese texto ya pertenece
+    a la siguiente seccion, no a la que estamos leyendo."""
+    earliest = None
+    for pat in SECTION_BOUNDARY_HEADERS:
+        m = re.search(pat, snippet[5:], re.IGNORECASE)
+        if m and (earliest is None or m.start() < earliest):
+            earliest = m.start()
+    return snippet[:earliest + 5] if earliest is not None else snippet
+
+
+def _drop_incomplete_tail(sentences):
+    """Si el ultimo fragmento no termina en puntuacion de cierre de frase,
+    la ventana de texto lo corto a mitad de palabra/frase -- se descarta en
+    vez de devolver algo incompleto."""
+    if sentences and not sentences[-1].rstrip().endswith((".", "!", "?", "…")):
+        sentences = sentences[:-1]
+    return sentences
+
 OBJETO_HEADERS = [
     r"OBJETO\s+DEL\s+PROCEDIMIENTO",
     r"OBJETO\s+DE\s+LA\s+DEMANDA",
@@ -402,8 +434,10 @@ def extract_objeto(text):
         m = re.search(pat, text, re.IGNORECASE)
         if m:
             snippet = text[m.end():m.end() + 260].strip(" .:;-")
-            snippet = re.split(r"(?<=[\.\!\?])\s", snippet)
-            snippet = " ".join(snippet[:2]).strip()
+            snippet = _cut_before_next_header(snippet)
+            parts = re.split(r"(?<=[\.\!\?])\s", snippet)
+            parts = _drop_incomplete_tail(parts)
+            snippet = " ".join(parts[:2]).strip()
             if len(snippet) > 15:
                 return snippet[:280]
     return REVISAR
@@ -486,7 +520,9 @@ def extract_fundamentos_derecho(text, max_bullets=4):
         if not m:
             continue
         snippet = text[m.end():m.end() + 500].strip(" .:;-")
+        snippet = _cut_before_next_header(snippet)
         sentences = re.split(r"(?<=[\.\!\?])\s+", snippet)
+        sentences = _drop_incomplete_tail(sentences)
         bullets = [s.strip() for s in sentences if len(s.strip()) > 20][:max_bullets]
         if bullets:
             return bullets
@@ -558,7 +594,7 @@ ESTADO_KEYWORDS = {
 }
 
 def suggest_estado(text):
-    low = text.lower()
+    low = _flat(text).lower()
     for estado, keywords in ESTADO_KEYWORDS.items():
         for kw in keywords:
             if kw in low:
@@ -578,7 +614,7 @@ def suggest_estado_multi(doc_texts):
     scores = Counter()
     n = len(doc_texts)
     for i, text in enumerate(doc_texts):
-        low = text.lower()
+        low = _flat(text).lower()
         weight = 1.0 + (i / max(n - 1, 1))  # de 1.0 (primer doc) a 2.0 (ultimo doc)
         for estado, keywords in ESTADO_KEYWORDS.items():
             for kw in keywords:
@@ -616,9 +652,27 @@ def _is_reversed_boilerplate(sentence):
     return bool(re.search(r"www\.|\.org|\.es\b|c[oó]digo|verificaci[oó]n", reversed_s, re.IGNORECASE))
 
 def clean_text(text):
+    # Normaliza saltos de linea de Windows/Mac a "\n" simple.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     for pat in NOISE_PATTERNS:
         text = re.sub(pat, " ", text, flags=re.IGNORECASE)
-    return re.sub(r"\s+", " ", text).strip()
+    # Colapsa espacios/tabulaciones DENTRO de una linea, pero conserva los
+    # saltos de linea reales: son la unica señal de donde acaba una etiqueta
+    # (ej. "Procurador: Fulano") y empieza lo siguiente. El re.sub(r"\s+", " ")
+    # anterior los destruia a todos, y "Procurador: Fulano\nOBJETO DE LA
+    # DEMANDA" se convertia en "Procurador: Fulano OBJETO DE LA DEMANDA" sin
+    # ninguna frontera para detectar.
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+def _flat(text):
+        """Aplana los saltos de linea a espacios SOLO para busquedas de
+        palabra/frase que no dependen de una etiqueta (Materia, Estado, nombre
+        del Juzgado): una frase clave puede aparecer partida en dos lineas por
+        el ajuste de texto del PDF, y sin aplanar no se reconoceria."""
+        return text.replace("\n", " ")
 
 
 # ---------------------------------------------------------------------------
