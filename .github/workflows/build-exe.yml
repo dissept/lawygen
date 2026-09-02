@@ -1,0 +1,35 @@
+name: Build Windows EXE
+
+# Se ejecuta automaticamente cada vez que subes cambios a la rama principal,
+# y tambien se puede lanzar manualmente desde la pestaña "Actions" de GitHub.
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generar el ejecutable
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name "LawyGen" --icon "assets/lawygen_icon.ico" --add-data "assets;assets" app.py
+
+      - name: Subir el .exe como artefacto descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: LawyGen-Windows
+          path: dist/LawyGen.exe
