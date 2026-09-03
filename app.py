@@ -6,6 +6,7 @@ Interfaz grafica de escritorio (Tkinter, incluido en Python estandar).
 import os
 import sys
 import threading
+import queue
 import traceback
 import webbrowser
 import tkinter as tk
@@ -80,8 +81,10 @@ class App(tk.Tk):
         self.root_folder = tk.StringVar()
         self.status_text = tk.StringVar(value="Listo")
         self._buttons = []
+        self._event_queue = queue.Queue()
         self._build_style()
         self._build_ui()
+        self.after(80, self._poll_queue)
 
     # ------------------------------------------------------------------
     def _build_style(self):
@@ -227,14 +230,13 @@ class App(tk.Tk):
         self.update_idletasks()
 
     def _log_router(self, msg):
-        """process_root_folder llama a esto con texto plano; clasificamos por prefijo."""
         text = str(msg)
         if "[ERROR" in text:
-            self._log(text.replace("[ERROR]", "").replace("[ERROR CRÍTICO]", "").strip(), "error")
+            self._event_queue.put(("log", (text.replace("[ERROR]", "").replace("[ERROR CRÍTICO]", "").strip(), "error")))
         elif "[AVISO]" in text:
-            self._log(text.replace("[AVISO]", "").strip(), "aviso")
+            self._event_queue.put(("log", (text.replace("[AVISO]", "").strip(), "aviso")))
         else:
-            self._log(text, "info")
+            self._event_queue.put(("log", (text, "info")))
 
     def _set_buttons_enabled(self, enabled):
         for b in self._buttons:
@@ -262,6 +264,7 @@ class App(tk.Tk):
         t.start()
 
     def _run_pipeline(self, root_path, mode):
+        q = self._event_queue
         try:
             subfolders = [
                 n for n in os.listdir(root_path)
@@ -269,21 +272,22 @@ class App(tk.Tk):
             ]
             total = len(subfolders)
             if total == 0:
-                self._log("No se encontraron subcarpetas dentro de la carpeta seleccionada.", "aviso")
-                self._finish(PURPLE_400, "Listo")
+                q.put(("log", ("No se encontraron subcarpetas dentro de la carpeta seleccionada.", "aviso")))
+                q.put(("finish", (PURPLE_400, "Listo")))
                 return
 
-            self.progress.config(maximum=total)
+            q.put(("progress_max", total))
 
             def on_progress(i, tot):
-                self.progress["value"] = i
-                self._set_status(f"Procesando {i}/{tot} carpetas...", PURPLE_600)
+                q.put(("progress", i))
+                q.put(("status", (f"Procesando {i}/{tot} carpetas...", PURPLE_600)))
 
-            self._log(f"Encontradas {total} subcarpetas. Iniciando procesamiento...")
+            q.put(("log", (f"Encontradas {total} subcarpetas. Iniciando procesamiento...", "info")))
             if config_store.is_ai_enabled():
-                self._log(f"IA activada (modelo: {config_store.get_model()}).\n")
+                q.put(("log", (f"IA activada (modelo: {config_store.get_model()}).\n", "info")))
             else:
-                self._log("Modo gratuito: usando solo reglas de texto (sin IA).\n")
+                q.put(("log", ("Modo gratuito: usando solo reglas de texto (sin IA).\n", "info")))
+
             rows, generated_files = processor.process_root_folder(
                 root_path, mode, progress_callback=on_progress, log=self._log_router
             )
@@ -291,39 +295,63 @@ class App(tk.Tk):
             if mode == processor.MODE_EXCEL:
                 out_path = os.path.join(root_path, "Seguimiento_Legal.xlsx")
                 excel_builder.build_workbook(rows, out_path)
-                self._log(f"\nExcel generado: {out_path}", "exito")
-                self._log(f"Filas totales: {len(rows)}", "exito")
+                q.put(("log", (f"\nExcel generado: {out_path}", "exito")))
+                q.put(("log", (f"Filas totales: {len(rows)}", "exito")))
                 msg = f"Proceso completado.\n\nExcel generado en:\n{out_path}"
             else:
                 if mode == processor.MODE_RESUMEN:
-                    self._log(f"\nResumen General consolidado generado.", "exito")
+                    q.put(("log", ("\nResumen General consolidado generado.", "exito")))
                     for p in generated_files:
-                        self._log(f"  {p}")
+                        q.put(("log", (f"  {p}", "info")))
                     msg = f"Proceso completado.\n\nResumen General guardado en:\n{generated_files[0] if generated_files else '(sin datos)'}"
                 else:
-                    self._log(f"\nEsquemas generados: {len(generated_files)} archivo(s) .docx (con diagrama visual)", "exito")
+                    q.put(("log", (f"\nEsquemas generados: {len(generated_files)} archivo(s) .docx (con diagrama visual)", "exito")))
                     for p in generated_files:
-                        self._log(f"  {p}")
-                    msg = f"Proceso completado.\n\nEsquemas con diagrama generados dentro de cada subcarpeta."
+                        q.put(("log", (f"  {p}", "info")))
+                    msg = "Proceso completado.\n\nEsquemas con diagrama generados dentro de cada subcarpeta."
 
-            self._log("\nRevisa los campos marcados como 'revisar' — el dato no pudo "
-                       "determinarse con certeza a partir del contenido.", "aviso")
-
-            self._set_status("Completado", GREEN)
-            messagebox.showinfo("LawyGen", msg)
+            q.put(("log", ("\nRevisa los campos marcados como 'revisar' — el dato no pudo "
+                            "determinarse con certeza a partir del contenido.", "aviso")))
+            q.put(("status", ("Completado", GREEN)))
+            q.put(("info", msg))
         except Exception as e:
-            self._log(f"\n[ERROR CRÍTICO] {e}", "error")
-            self._log(traceback.format_exc())
-            self._set_status("Error", RED)
-            messagebox.showerror("Error", f"Ocurrió un error:\n{e}")
+            q.put(("log", (f"\n[ERROR CRÍTICO] {e}", "error")))
+            q.put(("log", (traceback.format_exc(), "info")))
+            q.put(("status", ("Error", RED)))
+            q.put(("error", f"Ocurrió un error:\n{e}"))
         finally:
-            self._finish()
+            q.put(("finish", (None, None)))
 
     def _finish(self, dot_color=None, status_label=None):
         self._set_buttons_enabled(True)
         if status_label:
             self._set_status(status_label, dot_color or PURPLE_400)
 
+    def _poll_queue(self):
+        """Corre en el hilo principal via .after(). Es el UNICO lugar donde
+        se tocan widgets con datos que vienen del hilo de fondo -- Tkinter
+        no es thread-safe, así que el hilo de trabajo nunca debe llamar
+        directamente a self._log/self._set_status/messagebox/etc."""
+        try:
+            while True:
+                kind, payload = self._event_queue.get_nowait()
+                if kind == "log":
+                    self._log(*payload)
+                elif kind == "status":
+                    self._set_status(*payload)
+                elif kind == "progress":
+                    self.progress["value"] = payload
+                elif kind == "progress_max":
+                    self.progress.config(maximum=payload)
+                elif kind == "info":
+                    messagebox.showinfo("LawyGen", payload)
+                elif kind == "error":
+                    messagebox.showerror("Error", payload)
+                elif kind == "finish":
+                    self._finish(*payload)
+        except queue.Empty:
+            pass
+        self.after(80, self._poll_queue)
 
 if __name__ == "__main__":
     try:
