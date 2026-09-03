@@ -390,10 +390,11 @@ def extract_materia_multi(doc_texts):
 # Encabezados de seccion que NO deben colarse dentro del contenido de OTRO
 # campo (Objeto, Fundamentos...): si aparecen dentro de la ventana de texto
 # que estamos leyendo, es que ya cruzamos a la siguiente seccion.
+# СТАЛО
 SECTION_BOUNDARY_HEADERS = [
-    r"\bHECHOS\b", r"\bFUNDAMENTOS\s+DE\s+DERECHO\b", r"\bFUNDAMENTOS?\s+JUR[IÍ]DICOS\b",
-    r"\bSUPLICO\b", r"\bOTROS[IÍ]\s+DIGO\b", r"\bFALLO\b", r"\bANTECEDENTES\s+DE\s+HECHO\b",
-    r"\bPETICIONES?\b",
+    r"(?:^|\n)\s*HECHOS\b", r"(?:^|\n)\s*FUNDAMENTOS\s+DE\s+DERECHO\b", r"(?:^|\n)\s*FUNDAMENTOS?\s+JUR[IÍ]DICOS\b",
+    r"(?:^|\n)\s*SUPLICO\b", r"(?:^|\n)\s*OTROS[IÍ]\s+DIGO\b", r"(?:^|\n)\s*FALLO\b", r"(?:^|\n)\s*ANTECEDENTES\s+DE\s+HECHO\b",
+    r"(?:^|\n)\s*PETICIONES?\b",
 ]
 
 
@@ -403,10 +404,15 @@ def _cut_before_next_header(snippet):
     usamos para localizar esta seccion), recorta ahi: ese texto ya pertenece
     a la siguiente seccion, no a la que estamos leyendo."""
     earliest = None
+    # СТАЛО
     for pat in SECTION_BOUNDARY_HEADERS:
-        m = re.search(pat, snippet[5:], re.IGNORECASE)
-        if m and (earliest is None or m.start() < earliest):
-            earliest = m.start()
+        # sin IGNORECASE: solo cuenta como límite de sección si está en
+        # MAYÚSCULAS al inicio de línea -- así es como se ven los
+        # encabezados reales. Si no, "hechos" en minúscula dentro de una
+        # frase normal se confundía con un encabezado y cortaba el texto.
+            m = re.search(pat, snippet[5:])
+            if m and (earliest is None or m.start() < earliest):
+                earliest = m.start()
     return snippet[:earliest + 5] if earliest is not None else snippet
 
 
@@ -750,22 +756,37 @@ def summarize(text, max_sentences=6):
         return REVISAR
     return " ".join(bullets)
 
+# Lineas que son "cabecera/membrete" (juzgado, numero de procedimiento,
+# DEMANDANTE:, Abogado:, etc.) y no deben tratarse como parte de una frase
+# de contenido real -- si no se separan, todo el bloque de cabecera se cuela
+# como un "punto clave" en el Resumen (visto en Caso 1/2/3 del test).
+_HEADER_LINE_WORDS = (
+    r"JUZGADO|TRIBUNAL|AUDIENCIA\s+PROVINCIAL|SALA\s+DE\s+LO|"
+    r"PROCEDIMIENTO|JUICIO|DILIGENCIAS\s+PREVIAS|AUTOS|EXPEDIENTE|"
+    r"EJECUCI[ÓO]N|RECURSO\s+DE"
+)
+_HEADER_LABEL_WORDS = "|".join(PARTES_LABELS + REPRESENTANTE_LABELS)
+_HEADER_LINE_RE = re.compile(
+    rf"^[ \t]*(?:(?:{_HEADER_LINE_WORDS})\b[^\n]*|(?:{_HEADER_LABEL_WORDS})\s*:[^\n]*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 def _candidate_sentences(text):
-    # evita partir frases justo despues de abreviaturas como "D." o "Dña."
     split_pat = r"(?<=[\.\!\?])(?<!\bD\.)(?<!\bDña\.)(?<!\bSr\.)(?<!\bSra\.)(?<!\bD\.ª)\s+"
-    sentences = re.split(split_pat, text)
     out = []
-    for s in sentences:
-        s = s.strip(" .;-")
-        if len(s) < 30 or len(s) > 400:
+    for block in _HEADER_LINE_RE.split(text):
+        if not block or not block.strip():
             continue
-        if _is_reversed_boilerplate(s):
-            continue
-        digits = sum(1 for c in s if c.isdigit())
-        if digits / max(len(s), 1) > 0.12:
-            continue
-        out.append(s)
+        for s in re.split(split_pat, block):
+            s = s.strip(" .;-")
+            if len(s) < 30 or len(s) > 400:
+                continue
+            if _is_reversed_boilerplate(s):
+                continue
+            digits = sum(1 for c in s if c.isdigit())
+            if digits / max(len(s), 1) > 0.12:
+                continue
+            out.append(s)
     return out
 
 
