@@ -7,7 +7,8 @@ Genera el Excel de seguimiento con:
   - Documento: hipervinculo directo al PDF principal (ruta absoluta local)
 """
 import os
-from openpyxl import Workbook
+import re
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
@@ -35,10 +36,84 @@ ESTADO_COL = FIELD_KEYS.index("Estado") + 1  # 12
 
 ESTADOS = ["Abierto", "En trámite", "En apelación", "Suspendido", "Archivado", "Resuelto"]
 
+META_SHEET_NAME = "_LawyGenMeta"
+
+# Columnas "de contenido" que se protegen si el usuario las edito a mano.
+# Carpeta y Documento quedan fuera: son datos estructurales, siempre deben
+# reflejar la carpeta/archivo real.
+MERGE_COLUMNS = FIELD_KEYS + ["Adjuntos", "DocumentosDemandado", "DocumentosDemandante"]
+
+def _row_key(row):
+    proc = row.get("Procedimiento", "") or ""
+    m = re.search(r"\d{1,6}\s*[/\-]\s*\d{2,4}", proc)
+    proc_key = m.group(0).replace(" ", "") if m else proc
+    return f"{row.get('Carpeta', '')}||{proc_key}"
+
+
+def _load_previous(output_path):
+    old_values, old_meta = {}, {}
+    if not os.path.exists(output_path):
+        return old_values, old_meta
+    try:
+        wb_old = load_workbook(output_path, data_only=True)
+    except Exception:
+        return old_values, old_meta
+
+    if "Seguimiento Legal" in wb_old.sheetnames:
+        ws_old = wb_old["Seguimiento Legal"]
+        # Mapeamos por POSICION de columna (el mismo layout que escribe
+        # build_workbook), no por el texto del encabezado visible -- ese
+        # texto es distinto del nombre interno para varias columnas (ej.
+        # encabezado "Objeto / causa juzgada" vs nombre interno "Objeto"),
+        # y comparar por nombres distintos hacia que el merge pensara que
+        # esas columnas se habian borrado a mano.
+        col_index = {name: i + 1 for i, name in enumerate(FIELD_KEYS)}
+        col_index["Carpeta"] = CARPETA_COL
+        col_index["Adjuntos"] = ADJUNTOS_COL
+        col_index["DocumentosDemandado"] = DEMANDADO_COL
+        col_index["DocumentosDemandante"] = DEMANDANTE_COL
+        for row_cells in ws_old.iter_rows(min_row=2):
+                values = {name: row_cells[idx - 1].value for name, idx in col_index.items()}
+                key = _row_key({"Carpeta": values.get("Carpeta", ""), "Procedimiento": values.get("Procedimiento", "")})
+                old_values[key] = values
+
+    if META_SHEET_NAME in wb_old.sheetnames:
+        ws_meta = wb_old[META_SHEET_NAME]
+        meta_header = [c.value for c in ws_meta[1]]
+        meta_index = {name: i for i, name in enumerate(meta_header) if name}
+        for row_cells in ws_meta.iter_rows(min_row=2):
+            values = {name: row_cells[idx].value for name, idx in meta_index.items()}
+            key = values.get("_row_key")
+            if key:
+                old_meta[key] = values
+
+    return old_values, old_meta
+
+
+def _merge_row(row, old_values, old_meta):
+    key = _row_key(row)
+    prev_values = old_values.get(key, {})
+    prev_meta = old_meta.get(key, {})
+
+    row_final = dict(row)
+    row_meta = {}
+    for col in MERGE_COLUMNS:
+        new_auto = row.get(col, "")
+        row_meta[col] = new_auto
+
+        if key in old_values:
+            old_cell = prev_values.get(col, "")
+            old_auto = prev_meta.get(col, None)
+            edited_by_user = (old_auto is not None) and (old_cell != old_auto)
+            if edited_by_user:
+                row_final[col] = old_cell
+    return row_final, row_meta
 
 def build_workbook(rows, output_path):
     """rows: lista de dicts con keys = FIELD_KEYS + 'Carpeta' + 'Documento'
     (tupla (texto_visible, ruta_absoluta) o None) + 'Adjuntos' (texto)."""
+    old_values, old_meta = _load_previous(output_path)
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Seguimiento Legal"
@@ -56,9 +131,12 @@ def build_workbook(rows, output_path):
         c.border = border
 
     total_cols = len(HEADERS)
+    meta_rows = []
     for r_idx, row in enumerate(rows, start=2):
+        merged_row, row_meta = _merge_row(row, old_values, old_meta)
+        meta_rows.append((_row_key(row), row_meta))
         for col, key in enumerate(FIELD_KEYS, start=1):
-            value = row.get(key, "")
+            value = merged_row.get(key, "")
             ws.cell(row=r_idx, column=col, value=value if key != "Estado" else (value or "Abierto")).border = border
 
         ws.cell(row=r_idx, column=CARPETA_COL, value=row.get("Carpeta", "")).border = border
@@ -76,9 +154,10 @@ def build_workbook(rows, output_path):
             doc_cell.value = "revisar"
         doc_cell.border = border
 
-        ws.cell(row=r_idx, column=ADJUNTOS_COL, value=row.get("Adjuntos", "—")).border = border
-        ws.cell(row=r_idx, column=DEMANDADO_COL, value=row.get("DocumentosDemandado", "—")).border = border
-        ws.cell(row=r_idx, column=DEMANDANTE_COL, value=row.get("DocumentosDemandante", "—")).border = border
+        ws.cell(row=r_idx, column=ADJUNTOS_COL, value=merged_row.get("Adjuntos", "—")).border = border
+        ws.cell(row=r_idx, column=DEMANDADO_COL, value=merged_row.get("DocumentosDemandado", "—")).border = border
+        ws.cell(row=r_idx, column=DEMANDANTE_COL, value=merged_row.get("DocumentosDemandante", "—")).border = border
+
 
         for col in range(1, total_cols + 1):
             ws.cell(row=r_idx, column=col).alignment = Alignment(vertical="top", wrap_text=True)
@@ -106,6 +185,10 @@ def build_workbook(rows, output_path):
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(total_cols)}{last_row}"
-
+    ws_meta = wb.create_sheet(META_SHEET_NAME)
+    ws_meta.append(["_row_key"] + MERGE_COLUMNS)
+    for key, row_meta in meta_rows:
+            ws_meta.append([key] + [row_meta.get(c, "") for c in MERGE_COLUMNS])
+    ws_meta.sheet_state = "hidden"
     wb.save(output_path)
     return output_path
