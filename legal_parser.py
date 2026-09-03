@@ -390,7 +390,6 @@ def extract_materia_multi(doc_texts):
 # Encabezados de seccion que NO deben colarse dentro del contenido de OTRO
 # campo (Objeto, Fundamentos...): si aparecen dentro de la ventana de texto
 # que estamos leyendo, es que ya cruzamos a la siguiente seccion.
-# СТАЛО
 SECTION_BOUNDARY_HEADERS = [
     r"(?:^|\n)\s*HECHOS\b", r"(?:^|\n)\s*FUNDAMENTOS\s+DE\s+DERECHO\b", r"(?:^|\n)\s*FUNDAMENTOS?\s+JUR[IÍ]DICOS\b",
     r"(?:^|\n)\s*SUPLICO\b", r"(?:^|\n)\s*OTROS[IÍ]\s+DIGO\b", r"(?:^|\n)\s*FALLO\b", r"(?:^|\n)\s*ANTECEDENTES\s+DE\s+HECHO\b",
@@ -404,7 +403,6 @@ def _cut_before_next_header(snippet):
     usamos para localizar esta seccion), recorta ahi: ese texto ya pertenece
     a la siguiente seccion, no a la que estamos leyendo."""
     earliest = None
-    # СТАЛО
     for pat in SECTION_BOUNDARY_HEADERS:
         # sin IGNORECASE: solo cuenta como límite de sección si está en
         # MAYÚSCULAS al inicio de línea -- así es como se ven los
