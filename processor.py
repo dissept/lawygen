@@ -94,13 +94,12 @@ def _analyze_folder(folder_path, log=print):
     fundamentos_derecho = lp.extract_fundamentos_derecho_multi(doc_texts) if has_text else [lp.REVISAR]
     cuantia_costas = lp.extract_cuantia_costas_multi(doc_texts) if has_text else lp.REVISAR
     procedimientos = lp.extract_procedimientos_multi(doc_texts) if has_text else [lp.REVISAR]
-    estado = lp.suggest_estado_multi(doc_texts) if has_text else "Abierto"
+    estado = lp.suggest_estado_multi(doc_texts, doc_labels) if has_text else "Abierto"
     resumen_bullets = lp.summarize_bullets_multi(doc_texts) if has_text else [lp.REVISAR]
     resumen_corto = lp.resumen_corto_from_bullets(resumen_bullets) if has_text else lp.REVISAR
     argumentos_bullets = [lp.REVISAR]
     esquema_steps = lp.extract_esquema_steps_multi(doc_texts) if has_text else None
-    esquema = ("\n".join(f"- {s.split(':')[0]}" for s in esquema_steps[:6]) if esquema_steps else lp.REVISAR)
-
+    esquema = ("\n".join(f"- {s}" for s in esquema_steps[:6]) if esquema_steps else lp.REVISAR)
     # Documentos por parte (si el despacho organiza subcarpetas "Demandado" /
     # "Demandante"): sin IA, un resumen extractivo de esos documentos; con
     # IA, se sustituye por algo mejor redactado en merge_ai_into_analysis.
@@ -316,6 +315,11 @@ def _write_esquema_docx(folder_path, a):
     meta.add_run(f"Carpeta: {a['folder_name']}\n").italic = True
     meta.add_run(f"Generado: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}").italic = True
 
+    if a["esquema"] and a["esquema"] != lp.REVISAR:
+        d.add_heading("Detalle textual", level=2)
+        for line in a["esquema"].split("\n"):
+            d.add_paragraph(line.lstrip("- ").strip(), style="List Bullet")
+
     d.add_heading("Diagrama del procedimiento", level=2)
 
     steps = a.get("esquema_steps")
@@ -335,11 +339,6 @@ def _write_esquema_docx(folder_path, a):
             "No se detectaron suficientes fases o cláusulas numeradas en el "
             "documento para construir un diagrama. Revisar manualmente."
         )
-
-    if a["esquema"] and a["esquema"] != lp.REVISAR:
-        d.add_heading("Detalle textual", level=2)
-        for line in a["esquema"].split("\n"):
-            d.add_paragraph(line.lstrip("- ").strip(), style="List Bullet")
 
     _add_note(d, ai_used=a.get("ai_used", False))
 

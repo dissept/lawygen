@@ -606,28 +606,59 @@ def suggest_estado(text):
     return "Abierto"  # valor por defecto conservador; el usuario debe revisar
 
 
-def suggest_estado_multi(doc_texts):
-    """Combina todos los documentos de la carpeta, ponderando los últimos
-    algo más que los primeros: en un expediente, los documentos más
-    recientes (a menudo los últimos en añadirse a la carpeta) suelen
-    reflejar mejor el estado ACTUAL que el primer escrito presentado.
-    No es perfecto (depende del orden de los archivos), pero es mucho
-    mejor que quedarse solo con la primera coincidencia encontrada."""
+RESOLUCION_MARKERS = [
+    r"\bjuzgado\s+acuerda\b", r"\btribunal\s+acuerda\b",
+    r"\bse\s+acuerda\b", r"\bacuerda\s*:",
+    r"\bse\s+resuelve\b", r"\bresuelve\s*:",
+    r"\bse\s+dispone\b", r"\bdispone\s*:",
+    r"\bse\s+decreta\b", r"\bdecreta\s*:",
+    r"\bprove[ey]\b",
+    r"\bdict\w*\b",
+    r"\bparte\s+dispositiva\b",
+    r"\bfallo\b", r"\bfallamos\b",
+]
+
+def _has_resolution_marker_near(low_text, start, end, before=150, after=40):
+    span = low_text[max(0, start - before):min(len(low_text), end + after)]
+    return any(re.search(pat, span) for pat in RESOLUCION_MARKERS)
+
+def suggest_estado_multi(doc_texts, doc_labels=None):
+    """Combina todos los documentos de la carpeta. Prioriza las coincidencias
+    que aparecen cerca de un marcador de resolución judicial (el juzgado
+    "acuerda"/"resuelve"/"dispone" algo) frente a las que solo aparecen en
+    un escrito de una parte (que puede simplemente estar SOLICITANDO ese
+    estado, no confirmándolo). Si nada tiene marcador de resolución cerca,
+    usa como último recurso las coincidencias fuera de subcarpetas de parte
+    (Demandado/Demandante), y si tampoco hay, cualquier coincidencia."""
     if not doc_texts:
         return "Abierto"
-    scores = Counter()
+    if doc_labels is None:
+        doc_labels = [None] * len(doc_texts)
     n = len(doc_texts)
-    for i, text in enumerate(doc_texts):
+    strong_scores = Counter()
+    weak_scores = Counter()
+    fallback_scores = Counter()
+    for i, (text, label) in enumerate(zip(doc_texts, doc_labels)):
         low = _flat(text).lower()
-        weight = 1.0 + (i / max(n - 1, 1))  # de 1.0 (primer doc) a 2.0 (ultimo doc)
+        weight = 1.0 + (i / max(n - 1, 1))
         for estado, keywords in ESTADO_KEYWORDS.items():
             for kw in keywords:
-                if kw in low:
-                    scores[estado] += weight
-    if not scores:
-        return "Abierto"
-    return scores.most_common(1)[0][0]
-
+                m = re.search(re.escape(kw), low)
+                if not m:
+                    continue
+                if _has_resolution_marker_near(low, m.start(), m.end()):
+                    strong_scores[estado] += weight
+                else:
+                    weak_scores[estado] += weight
+                    if not label:
+                        fallback_scores[estado] += weight
+    if strong_scores:
+        return strong_scores.most_common(1)[0][0]
+    if fallback_scores:
+        return fallback_scores.most_common(1)[0][0]
+    if weak_scores:
+        return weak_scores.most_common(1)[0][0]
+    return "Abierto"
 
 # ---------------------------------------------------------------------------
 # LIMPIEZA DE RUIDO (cabeceras, pies de página, códigos de verificación,
@@ -877,6 +908,20 @@ def build_esquema(text):
     return "\n".join(f"- {e}" for e in esquema)
 
 
+def _clip_to_sentence(raw, max_len=200):
+    """Corta 'raw' en el primer punto/exclamacion/interrogacion que
+    encuentre dentro de max_len caracteres, para no partir una frase a
+    mitad. Si no hay una frase completa tan corta, corta duro en max_len
+    y marca con "…" para que quede claro que el texto seguia."""
+    raw = raw.strip()
+    if not raw:
+        return ""
+    m = re.search(r"[\.\!\?](?=\s|$)", raw)
+    if m and m.end() <= max_len:
+        return raw[:m.end()].strip()
+    return raw[:max_len].rstrip(" ,;:") + "…"
+
+
 def extract_esquema_steps(text):
     """Version 'rica' del esquema para el diagrama visual: una lista ordenada
     de pasos, cada uno con un fragmento real de contenido (no solo el nombre
@@ -887,19 +932,22 @@ def extract_esquema_steps(text):
     for header in ESQUEMA_HEADERS:
         m = re.search(rf"\b{header}\b", text, re.IGNORECASE)
         if m:
-            snippet = text[m.end():m.end() + 140].strip(" .:;-")
-            snippet = re.split(r"(?<=[\.\!\?])\s", snippet)[0]
+            window = text[m.end():m.end() + 400].strip(" .:;-")
+            snippet = _clip_to_sentence(window, max_len=200)
             label = header.title()
             content = f"{label}: {snippet}" if snippet else label
-            matches.append((m.start(), content[:160]))
+            matches.append((m.start(), content))
 
-    for m in re.finditer(
-        r"\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SÉPTIMO|OCTAVO)\.?\s*[-–.]\s*([^\.\n]{10,140})",
-        text, re.IGNORECASE
-    ):
+    numeral_re = r"\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SÉPTIMO|OCTAVO)\.?\s*[-–.]"
+    for m in re.finditer(numeral_re, text, re.IGNORECASE):
         label = m.group(1).title()
-        snippet = m.group(2).strip()
-        matches.append((m.start(), f"{label}: {snippet}"))
+        # cortar la ventana en el siguiente PRIMERO/SEGUNDO/... si aparece
+        # antes de los 400 caracteres, para no arrastrar el punto siguiente
+        next_marker = re.search(numeral_re, text[m.end():m.end() + 400], re.IGNORECASE)
+        window_end = m.end() + (next_marker.start() if next_marker else 400)
+        snippet = _clip_to_sentence(text[m.end():window_end], max_len=200)
+        if snippet:
+            matches.append((m.start(), f"{label}: {snippet}"))
 
     if not matches:
         return None
