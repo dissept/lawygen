@@ -12,6 +12,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
+from openpyxl.comments import Comment
 
 HEADERS = [
     "Asunto", "Resumen", "Procedimiento", "Materia", "Juzgado", "Partes",
@@ -43,6 +44,11 @@ META_SHEET_NAME = "_LawyGenMeta"
 # reflejar la carpeta/archivo real.
 MERGE_COLUMNS = FIELD_KEYS + ["Adjuntos", "DocumentosDemandado", "DocumentosDemandante"]
 
+# Igual que HEADERS pero con los nombres internos de cada columna, en el
+# mismo orden -- se usa para dejar una marca oculta en cada encabezado (ver
+# el bucle de escritura de encabezados y _load_previous).
+COLUMN_KEYS = FIELD_KEYS + ["Carpeta", "Documento", "Adjuntos", "DocumentosDemandado", "DocumentosDemandante"]
+
 def _row_key(row):
     proc = row.get("Procedimiento", "") or ""
     m = re.search(r"\d{1,6}\s*[/\-]\s*\d{2,4}", proc)
@@ -61,17 +67,30 @@ def _load_previous(output_path):
 
     if "Seguimiento Legal" in wb_old.sheetnames:
         ws_old = wb_old["Seguimiento Legal"]
-        # Mapeamos por POSICION de columna (el mismo layout que escribe
-        # build_workbook), no por el texto del encabezado visible -- ese
-        # texto es distinto del nombre interno para varias columnas (ej.
-        # encabezado "Objeto / causa juzgada" vs nombre interno "Objeto"),
-        # y comparar por nombres distintos hacia que el merge pensara que
-        # esas columnas se habian borrado a mano.
-        col_index = {name: i + 1 for i, name in enumerate(FIELD_KEYS)}
-        col_index["Carpeta"] = CARPETA_COL
-        col_index["Adjuntos"] = ADJUNTOS_COL
-        col_index["DocumentosDemandado"] = DEMANDADO_COL
-        col_index["DocumentosDemandante"] = DEMANDANTE_COL
+        # Ya no asumimos que "la columna N siempre es tal campo": el usuario
+        # puede renombrar, reordenar o editar las columnas del Excel a su
+        # gusto. En vez de eso, leemos la marca oculta ("LAWYGEN_KEY:...")
+        # que build_workbook deja como comentario en cada celda de
+        # encabezado -- ese comentario viaja con la celda si se mueve o
+        # reordena la columna en Excel, y no le afecta que se renombre el
+        # texto visible del encabezado.
+        col_index = {}
+        for cell in ws_old[1]:
+            comment = getattr(cell, "comment", None)
+            if not comment or not comment.text:
+                continue
+            first_line = comment.text.split("\n", 1)[0]
+            if first_line.startswith("LAWYGEN_KEY:"):
+                col_index[first_line[len("LAWYGEN_KEY:"):]] = cell.column
+
+        if not col_index:
+            # Archivo de una version anterior a esta marca (o alguien borro
+            # las notas a mano): no hay forma fiable de saber que columna es
+            # cada cosa. Mejor no arriesgar un merge mal hecho -- se
+            # regenera todo desde cero esta vez, como si no hubiera archivo
+            # previo.
+            return old_values, old_meta
+
         n_cols_old = ws_old.max_column
         for row_cells in ws_old.iter_rows(min_row=2):
             values = {
@@ -133,6 +152,12 @@ def build_workbook(rows, output_path):
         c.font = header_font
         c.alignment = Alignment(horizontal="center", vertical="center")
         c.border = border
+        c.comment = Comment(
+            f"LAWYGEN_KEY:{COLUMN_KEYS[col - 1]}\n"
+            "(No borrar esta nota: permite que LawyGen reconozca esta "
+            "columna aunque renombres el título o la muevas de sitio.)",
+            "LawyGen",
+        )
 
     total_cols = len(HEADERS)
     meta_rows = []
