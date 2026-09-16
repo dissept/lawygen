@@ -17,7 +17,7 @@ import excel_builder
 import config_store
 
 LINKEDIN_URL = "https://www.linkedin.com/in/ana-berjano-86290728a/"
-
+_LINKEDIN_URL = "https://www.linkedin.com/in/anastasiia-pertsova/"
 
 def _asset_path(*parts):
     """Resuelve rutas a /assets tanto en desarrollo (python app.py) como
@@ -121,12 +121,22 @@ class App(tk.Tk):
         tk.Label(title_block, text="LawyGen", font=("Segoe UI", 20, "bold"),
                  bg=PURPLE_900, fg="white").pack(anchor="w")
 
-        link = tk.Label(top_row, text="Made by Ana", font=("Segoe UI", 9, "underline"),
+        credits_block = tk.Frame(top_row, bg=PURPLE_900)
+        credits_block.pack(side="right", anchor="n", pady=(4, 0))
+
+        link = tk.Label(credits_block, text="Made by Ana", font=("Segoe UI", 9, "underline"),
                          bg=PURPLE_900, fg=PURPLE_100, cursor="hand2")
-        link.pack(side="right", anchor="n", pady=(4, 0))
+        link.pack(side="top", anchor="e")
         link.bind("<Button-1>", lambda e: webbrowser.open(LINKEDIN_URL))
         link.bind("<Enter>", lambda e: link.config(fg="white"))
         link.bind("<Leave>", lambda e: link.config(fg=PURPLE_100))
+
+        link2 = tk.Label(credits_block, text="& Asiia", font=("Segoe UI", 9, "underline"),
+                          bg=PURPLE_900, fg=PURPLE_100, cursor="hand2")
+        link2.pack(side="top", anchor="e")
+        link2.bind("<Button-1>", lambda e: webbrowser.open(_LINKEDIN_URL))
+        link2.bind("<Enter>", lambda e: link2.config(fg="white"))
+        link2.bind("<Leave>", lambda e: link2.config(fg=PURPLE_100))
 
         tk.Label(header, text="Generación automática de seguimiento legal a partir de expedientes",
                  font=("Segoe UI", 10), bg=PURPLE_900, fg=PURPLE_100).pack(anchor="w", padx=20, pady=(2, 16))
