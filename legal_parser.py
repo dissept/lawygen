@@ -550,9 +550,9 @@ CUANTIA_PATTERNS = [
     r"cantidad\s+de\s+([\d\.,]+\s*(?:euros|EUR|€))\s+en\s+concepto\s+de\s+principal",
 ]
 COSTAS_PATTERNS = [
-    r"(con\s+(?:expresa\s+)?imposici[oó]n\s+de\s+costas[^\n\.]{0,60})",
-    r"(sin\s+(?:expresa\s+)?imposici[oó]n\s+de\s+costas[^\n\.]{0,60})",
-    r"(cada\s+parte\s+abonar[aá]\s+las\s+costas[^\n\.]{0,60})",
+    r"(con\s+(?:expresa\s+)?imposici[oó]n\s+de\s+costas[^\.]{0,60})",
+    r"(sin\s+(?:expresa\s+)?imposici[oó]n\s+de\s+costas[^\.]{0,60})",
+    r"(cada\s+parte\s+abonar[aá]\s+las\s+costas[^\.]{0,60})",
 ]
 
 def extract_cuantia_costas(text):
@@ -928,21 +928,22 @@ def extract_esquema_steps(text):
     de la seccion), en el orden en que aparecen en el documento."""
     text = clean_text(text)
     matches = []
+    numeral_re = r"\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SÉPTIMO|OCTAVO)\.?\s*[-–.]"
 
     for header in ESQUEMA_HEADERS:
         m = re.search(rf"\b{header}\b", text, re.IGNORECASE)
         if m:
             window = text[m.end():m.end() + 400].strip(" .:;-")
-            snippet = _clip_to_sentence(window, max_len=200)
             label = header.title()
-            content = f"{label}: {snippet}" if snippet else label
-            matches.append((m.start(), content))
+            if re.match(numeral_re, window, re.IGNORECASE):
+                matches.append((m.start(), label))
+            else:
+                snippet = _clip_to_sentence(window, max_len=200)
+                content = f"{label}: {snippet}" if snippet else label
+                matches.append((m.start(), content))
 
-    numeral_re = r"\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SÉPTIMO|OCTAVO)\.?\s*[-–.]"
     for m in re.finditer(numeral_re, text, re.IGNORECASE):
         label = m.group(1).title()
-        # cortar la ventana en el siguiente PRIMERO/SEGUNDO/... si aparece
-        # antes de los 400 caracteres, para no arrastrar el punto siguiente
         next_marker = re.search(numeral_re, text[m.end():m.end() + 400], re.IGNORECASE)
         window_end = m.end() + (next_marker.start() if next_marker else 400)
         snippet = _clip_to_sentence(text[m.end():window_end], max_len=200)
