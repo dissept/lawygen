@@ -72,10 +72,14 @@ def _load_previous(output_path):
         col_index["Adjuntos"] = ADJUNTOS_COL
         col_index["DocumentosDemandado"] = DEMANDADO_COL
         col_index["DocumentosDemandante"] = DEMANDANTE_COL
+        n_cols_old = ws_old.max_column
         for row_cells in ws_old.iter_rows(min_row=2):
-                values = {name: row_cells[idx - 1].value for name, idx in col_index.items()}
-                key = _row_key({"Carpeta": values.get("Carpeta", ""), "Procedimiento": values.get("Procedimiento", "")})
-                old_values[key] = values
+            values = {
+                name: (row_cells[idx - 1].value if idx <= n_cols_old else None)
+                for name, idx in col_index.items()
+            }
+            key = _row_key({"Carpeta": values.get("Carpeta", ""), "Procedimiento": values.get("Procedimiento", "")})
+            old_values[key] = values
 
     if META_SHEET_NAME in wb_old.sheetnames:
         ws_meta = wb_old[META_SHEET_NAME]
