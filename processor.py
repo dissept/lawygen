@@ -255,7 +255,7 @@ def _add_datos_table(d, a):
 # ---------------------------------------------------------------------------
 # RESUMEN — un unico documento consolidado para toda la carpeta raiz
 # ---------------------------------------------------------------------------
-def _write_master_resumen_docx(root_path, analyses):
+def _write_master_resumen_docx(root_path, analyses, log=print):
     root_name = os.path.basename(root_path.rstrip(os.sep)) or "Casos"
     d = Document()
 
@@ -301,7 +301,17 @@ def _write_master_resumen_docx(root_path, analyses):
     _add_note(d, ai_used=any_ai_used)
 
     out_path = os.path.join(root_path, "Resumen_General.docx")
-    d.save(out_path)
+    try:
+        d.save(out_path)
+    except PermissionError:
+        alt_path = os.path.join(
+            root_path,
+            f"Resumen_General_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
+        )
+        d.save(alt_path)
+        log(f"  [AVISO] '{os.path.basename(out_path)}' estaba abierto en otro programa. "
+            f"Se guardó como '{os.path.basename(alt_path)}' para no perder el análisis ya hecho.")
+        return alt_path
     return out_path
 
 
@@ -390,7 +400,7 @@ def process_root_folder(root_path, mode, progress_callback=None, log=print):
 
     if mode == MODE_RESUMEN and analyses:
         log("\nConsolidando Resumen General...")
-        path = _write_master_resumen_docx(root_path, analyses)
+        path = _write_master_resumen_docx(root_path, analyses, log=log)
         generated_files.append(path)
 
     return all_rows, generated_files

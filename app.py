@@ -9,6 +9,7 @@ import threading
 import queue
 import traceback
 import webbrowser
+import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
@@ -304,7 +305,17 @@ class App(tk.Tk):
 
             if mode == processor.MODE_EXCEL:
                 out_path = os.path.join(root_path, "Seguimiento_Legal.xlsx")
-                excel_builder.build_workbook(rows, out_path)
+                try:
+                    excel_builder.build_workbook(rows, out_path)
+                except PermissionError:
+                    alt_path = os.path.join(
+                        root_path,
+                        f"Seguimiento_Legal_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    )
+                    excel_builder.build_workbook(rows, alt_path)
+                    out_path = alt_path
+                    q.put(("log", (f"\n[AVISO] El archivo original estaba abierto en Excel. "
+                                    f"Se guardó como: {out_path}", "aviso")))
                 q.put(("log", (f"\nExcel generado: {out_path}", "exito")))
                 q.put(("log", (f"Filas totales: {len(rows)}", "exito")))
                 msg = f"Proceso completado.\n\nExcel generado en:\n{out_path}"
