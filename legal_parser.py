@@ -928,12 +928,12 @@ def extract_esquema_steps(text):
     de la seccion), en el orden en que aparecen en el documento."""
     text = clean_text(text)
     matches = []
-    numeral_re = r"\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SÉPTIMO|OCTAVO)\.?\s*[-–.]"
+    numeral_re = r"\b(PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SÉPTIMO|OCTAVO|NOVENO|DÉCIMO|UNDÉCIMO|DECIMOPRIMERO|DUODÉCIMO|DECIMOSEGUNDO|DECIMOTERCERO|DECIMOCUARTO|DECIMOQUINTO|DECIMOSEXTO|DECIMOSÉPTIMO|DECIMOCTAVO|DECIMONOVENO|VIGÉSIMO)\.?\s*[-–.]"
 
     for header in ESQUEMA_HEADERS:
-        m = re.search(rf"\b{header}\b", text, re.IGNORECASE)
+        m = re.search(rf"(?m)^\s*{header}\b", text, re.IGNORECASE)
         if m:
-            window = text[m.end():m.end() + 400].strip(" .:;-")
+            window = text[m.end():m.end() + 400].strip(" \n\t.:;-")
             label = header.title()
             if re.match(numeral_re, window, re.IGNORECASE):
                 matches.append((m.start(), label))

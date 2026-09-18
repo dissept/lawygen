@@ -13,11 +13,15 @@ PARTY_ROLE_PATTERNS = {
 
 def extract_text_from_pdf(path, max_pages=60):
     """Devuelve el texto de un PDF. Limita paginas para no colgar el proceso
-    con documentos enormes (escaneados de cientos de paginas)."""
+    con documentos enormes (escaneados de cientos de paginas). Si el PDF
+    supera max_pages, se avisa en el log en vez de recortar en silencio --
+    en un caso largo real, lo que queda fuera del limite puede ser
+    precisamente el Suplico o el Fallo."""
     text_parts = []
     try:
         import pdfplumber
         with pdfplumber.open(path) as pdf:
+            total_pages = len(pdf.pages)
             for i, page in enumerate(pdf.pages):
                 if i >= max_pages:
                     break
@@ -28,7 +32,16 @@ def extract_text_from_pdf(path, max_pages=60):
                 text_parts.append(t)
     except Exception as e:
         return "", f"Error leyendo PDF ({os.path.basename(path)}): {e}"
-    return "\n".join(text_parts), None
+
+    warning = None
+    if total_pages > max_pages:
+        warning = (
+            f"'{os.path.basename(path)}' tiene {total_pages} páginas; solo se "
+            f"analizaron las primeras {max_pages} para no colgar el proceso. "
+            f"Contenido más allá de esa página (posible Suplico, Fallo, Anexos...) "
+            f"no se ha tenido en cuenta -- revisar manualmente."
+        )
+    return "\n".join(text_parts), warning
 
 
 def extract_text_from_docx(path):
