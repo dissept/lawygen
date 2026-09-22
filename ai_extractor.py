@@ -20,8 +20,12 @@ debe entonces recurrir a las reglas de texto como respaldo.
 """
 import json
 import re
+import unicodedata
 import urllib.request
 import urllib.error
+
+import excel_builder
+import legal_parser as lp
 
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -29,6 +33,24 @@ ANTHROPIC_VERSION = "2023-06-01"
 MAX_CHARS_PER_DOC = 30000     # recorte por documento (prioriza calidad: menos recorte)
 MAX_TOTAL_CHARS = 120000      # recorte total del conjunto de documentos de la carpeta
 REQUEST_TIMEOUT = 180         # segundos (mas margen: respuestas mas completas tardan mas)
+
+
+MATERIAS_VALIDAS = [m for m, _ in lp.MATERIA_KEYWORDS]
+
+
+def _normalize(s):
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    return s.strip().lower()
+
+
+def _match_whitelist(value, whitelist):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    norm = _normalize(value)
+    for option in whitelist:
+        if _normalize(option) == norm:
+            return option
+    return None
 
 SYSTEM_PROMPT = (
     "Eres un asistente jurídico que extrae datos estructurados de expedientes "
@@ -231,15 +253,15 @@ def merge_ai_into_analysis(a, ai_data, REVISAR="revisar"):
 
     a["juzgado"] = pick(ai_data.get("juzgado"), a.get("juzgado", REVISAR))
     a["partes"] = pick(ai_data.get("partes"), a.get("partes", REVISAR))
-    a["materia"] = pick(ai_data.get("materia"), a.get("materia", REVISAR))
+    a["materia"] = _match_whitelist(ai_data.get("materia"), MATERIAS_VALIDAS) or a.get("materia", REVISAR)
     a["representantes"] = pick(ai_data.get("representantes"), a.get("representantes", REVISAR))
     a["objeto"] = pick(ai_data.get("objeto"), a.get("objeto", REVISAR))
     a["cuantia_costas"] = pick(ai_data.get("cuantia_costas"), a.get("cuantia_costas", REVISAR))
     a["resumen_corto"] = pick(ai_data.get("resumen_corto"), a.get("resumen_corto", REVISAR))
 
-    ai_estado = ai_data.get("estado_sugerido")
-    if isinstance(ai_estado, str) and ai_estado.strip():
-        a["estado"] = ai_estado.strip()
+    ai_estado = _match_whitelist(ai_data.get("estado_sugerido"), excel_builder.ESTADOS)
+    if ai_estado:
+        a["estado"] = ai_estado
 
     ai_procs = ai_data.get("procedimientos")
     if isinstance(ai_procs, list) and ai_procs:
