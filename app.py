@@ -43,28 +43,40 @@ GREEN = "#15803D"
 ORANGE = "#B45309"
 RED = "#B91C1C"
 
-
-class HoverButton(tk.Button):
-    """Boton con efecto hover dinamico (cambia de tono al pasar el mouse)."""
-    def __init__(self, master, bg, hover_bg, **kwargs):
+class HoverButton(tk.Label):
+    """Boton con efecto hover. Se dibuja como Label porque macOS ignora el
+    color de fondo de tk.Button (en Windows se ve igual que antes)."""
+    def __init__(self, master, bg, hover_bg, command=None, **kwargs):
         super().__init__(
-            master, bg=bg, activebackground=hover_bg, fg="white",
-            activeforeground="white", bd=0, relief="flat", cursor="hand2",
-            font=("Segoe UI", 10, "bold"), **kwargs
+            master, bg=bg, fg="white", disabledforeground="white",
+            cursor="hand2", font=("Segoe UI", 10, "bold"),
+            padx=12, pady=4, **kwargs
         )
         self._bg = bg
         self._hover_bg = hover_bg
+        self._command = command
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+
+    def _on_click(self, _e):
+        if str(self["state"]) != "disabled" and self._command:
+            self._command()
 
     def _on_enter(self, _e):
-        if self["state"] != "disabled":
+        if str(self["state"]) != "disabled":
             self.config(bg=self._hover_bg)
 
     def _on_leave(self, _e):
-        if self["state"] != "disabled":
+        if str(self["state"]) != "disabled":
             self.config(bg=self._bg)
 
+    def set_disabled(self, disabled):
+        if disabled:
+            self.config(state="disabled", bg="#C4B5FD", cursor="arrow")
+        else:
+            self.config(state="normal", bg=self._bg, cursor="hand2")
+   
     def set_disabled(self, disabled):
         if disabled:
             self.config(state="disabled", bg="#C4B5FD", cursor="arrow")
@@ -148,7 +160,7 @@ class App(tk.Tk):
         except Exception:
             pass
 
-        body = tk.Frame(self, bg=PURPLE_50)
+        body = tk.Frame(self, bg=PURPLE_50,)
         body.pack(fill="both", expand=True, padx=20, pady=16)
 
         # ---------- Selector de carpeta ----------
