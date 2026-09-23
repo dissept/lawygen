@@ -27,21 +27,10 @@ MODE_EXCEL = "excel"
 MODE_RESUMEN = "resumen"
 MODE_ESQUEMA = "esquema"
 
-NOTE_TEXT_REGLAS = (
-    "Nota: este documento fue generado automáticamente mediante reglas de texto "
-    "(sin inteligencia artificial de pago). Los campos marcados como \"revisar\" "
-    "no pudieron determinarse con certeza a partir del contenido disponible y "
-    "deben verificarse manualmente."
+NOTE_TEXT = (
+    "Nota: los campos marcados como \"revisar\" no pudieron determinarse con "
+    "certeza a partir del contenido disponible y deben verificarse manualmente."
 )
-
-NOTE_TEXT_IA = (
-    "Nota: este documento fue generado automáticamente combinando reglas de "
-    "texto y un análisis asistido por IA (Claude, Anthropic) sobre el "
-    "contenido de los documentos de cada carpeta. Los campos marcados como "
-    "\"revisar\" no pudieron determinarse con certeza y deben verificarse "
-    "manualmente."
-)
-
 
 def _analyze_folder(folder_path, log=print):
     """Extrae todo lo necesario de una carpeta. Devuelve un dict con los
@@ -213,9 +202,9 @@ def _rows_from_analysis(a):
     return rows
 
 
-def _add_note(d, ai_used=False):
+def _add_note(d):
     note = d.add_paragraph()
-    run = note.add_run(NOTE_TEXT_IA if ai_used else NOTE_TEXT_REGLAS)
+    run = note.add_run(NOTE_TEXT)
     run.italic = True
     run.font.size = Pt(9)
     run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
@@ -274,10 +263,7 @@ def _write_master_resumen_docx(root_path, analyses, log=print):
 
     d.add_page_break()
 
-    any_ai_used = False
     for a in analyses:
-        if a.get("ai_used"):
-            any_ai_used = True
         d.add_heading(a["asunto"], level=1)
         d.add_heading("Datos identificados", level=2)
         _add_datos_table(d, a)
@@ -298,7 +284,7 @@ def _write_master_resumen_docx(root_path, analyses, log=print):
 
         d.add_paragraph()  # espaciado antes del siguiente asunto
 
-    _add_note(d, ai_used=any_ai_used)
+    _add_note(d)
 
     out_path = os.path.join(root_path, "Resumen_General.docx")
     try:
@@ -350,7 +336,7 @@ def _write_esquema_docx(folder_path, a):
             "documento para construir un diagrama. Revisar manualmente."
         )
 
-    _add_note(d, ai_used=a.get("ai_used", False))
+    _add_note(d)
 
     out_path = os.path.join(folder_path, f"{a['folder_name']}_Esquema.docx")
     d.save(out_path)
