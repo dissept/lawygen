@@ -8,6 +8,7 @@ Genera el Excel de seguimiento con:
 """
 import os
 import re
+from urllib.parse import quote
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -48,6 +49,15 @@ MERGE_COLUMNS = FIELD_KEYS + ["Adjuntos", "DocumentosDemandado", "DocumentosDema
 # mismo orden -- se usa para dejar una marca oculta en cada encabezado (ver
 # el bucle de escritura de encabezados y _load_previous).
 COLUMN_KEYS = FIELD_KEYS + ["Carpeta", "Documento", "Adjuntos", "DocumentosDemandado", "DocumentosDemandante"]
+
+def _file_uri(abs_path):
+    """Convierte una ruta local en un URI file:/// valido (espacios, tildes,
+    ñ, '#', '%'... codificados). Excel 2007 rechaza el archivo si un
+    hipervinculo contiene una ruta sin codificar."""
+    path = abs_path.replace("\\", "/")
+    if path.startswith("//"):          # ruta de red \\servidor\carpeta
+        return "file:" + quote(path, safe="/:")
+    return "file:///" + quote(path.lstrip("/"), safe="/:")
 
 def _row_key(row):
     proc = row.get("Procedimiento", "") or ""
@@ -175,7 +185,7 @@ def build_workbook(rows, output_path):
         if doc_info:
             display_name, abs_path = doc_info
             # file:/// URI para que el hipervinculo abra el archivo local
-            uri = "file:///" + abs_path.replace("\\", "/").lstrip("/")
+            uri = _file_uri(abs_path)
             doc_cell.value = display_name
             doc_cell.hyperlink = uri
             doc_cell.font = Font(color="0563C1", underline="single")
